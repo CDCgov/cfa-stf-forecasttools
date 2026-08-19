@@ -222,16 +222,21 @@ def daily_to_weekly(
             f"Specified trajectory id column(s) {missing_id_cols} are missing from the dataframe"
         )
 
-    df = df.with_columns(
-        pl.col(date_col)
-        .map_elements(
-            lambda elt: _calculate_week_and_year(elt, standard=standard),
-            return_dtype=pl.Struct(
-                [pl.Field("week", pl.Int64), pl.Field("weekyear", pl.Int64)]
-            ),
+    df = (
+        df.drop_nulls(value_col)
+        .drop_nans(value_col)
+        .with_columns(
+            pl.col(date_col)
+            .map_elements(
+                lambda elt: _calculate_week_and_year(elt, standard=standard),
+                return_dtype=pl.Struct(
+                    [pl.Field("week", pl.Int64), pl.Field("weekyear", pl.Int64)]
+                ),
+            )
+            .alias("week_struct")
         )
-        .alias("week_struct")
-    ).unnest("week_struct")
+        .unnest("week_struct")
+    )
 
     group_cols = ["week", "weekyear"] + id_cols
     grouped_df = df.group_by(group_cols).agg(
