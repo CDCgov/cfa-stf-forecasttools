@@ -82,6 +82,34 @@ def test_daily_to_weekly_invalid_standard_raises():
         daily_to_weekly(df=df, standard="mystandard")
 
 
+def _assert_daily_to_weekly_drops(invalid_value):
+    start = datetime.date(2026, 1, 4)
+    df = pl.DataFrame(
+        {
+            ".draw": [0] * 7 + [1] * 7,
+            "date": [start + datetime.timedelta(days=i) for i in range(7)] * 2,
+            "incidence": [1.0, invalid_value, 1.0, 1.0, 1.0, 1.0, 1.0]
+            + [invalid_value] * 7,
+        }
+    )
+
+    strict_out = daily_to_weekly(df, value_col="incidence")
+    non_strict_out = daily_to_weekly(df, value_col="incidence", strict=False)
+
+    assert strict_out.is_empty()
+    assert non_strict_out.select(".draw", "weekly_value").rows() == [(0, 6.0)]
+
+
+def test_daily_to_weekly_drops_nulls():
+    """Nulls should be removed before weekly aggregation."""
+    _assert_daily_to_weekly_drops(None)
+
+
+def test_daily_to_weekly_drops_nans():
+    """NaNs should be removed before weekly aggregation."""
+    _assert_daily_to_weekly_drops(float("nan"))
+
+
 @pytest.mark.parametrize(
     ("standard", "date_input", "expected_weekyear", "expected_week"),
     [
