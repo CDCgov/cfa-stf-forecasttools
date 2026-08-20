@@ -88,6 +88,60 @@ def test_append_prop_data_preserves_additional_identifier_columns():
     plt.assert_frame_equal(result, expected)
 
 
+def test_append_prop_data_uses_all_identifiers_to_match_inputs():
+    data = pl.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-01"],
+            "location": ["US", "US"],
+            "source": ["numerator", "other"],
+            ".variable": ["observed_ed_visits", "other_ed_visits"],
+            ".value": [2, 8],
+        }
+    )
+
+    result = ft.append_prop_data(data)
+
+    assert not result.get_column(".variable").eq("prop_disease_ed_visits").any()
+
+
+def test_append_prop_data_allows_custom_variable_names():
+    data = pl.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-01"],
+            "location": ["US", "US"],
+            ".variable": ["num_visits", "denom_other_visits"],
+            ".value": [3, 7],
+        }
+    )
+
+    result = ft.append_prop_data(
+        data,
+        observed_var="num_visits",
+        other_var="denom_other_visits",
+        prop_var="prop_num_visits",
+    )
+
+    prop_row = result.filter(pl.col(".variable") == "prop_num_visits")
+    assert prop_row.item(0, ".value") == 0.3
+
+
+def test_append_prop_data_matches_null_identifiers():
+    data = pl.DataFrame(
+        {
+            "date": ["2024-01-01", "2024-01-01"],
+            "all_null_id": [None, None],
+            ".variable": ["observed_ed_visits", "other_ed_visits"],
+            ".value": [1, 1],
+        }
+    )
+
+    result = ft.append_prop_data(data)
+    prop_row = result.filter(pl.col(".variable") == "prop_disease_ed_visits")
+
+    assert prop_row.item(0, ".value") == 0.5
+    assert prop_row.item(0, "all_null_id") is None
+
+
 def test_append_prop_data_errors_when_required_column_is_missing():
     data = pl.DataFrame(
         {
