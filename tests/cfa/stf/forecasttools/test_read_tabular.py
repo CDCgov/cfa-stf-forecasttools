@@ -51,9 +51,7 @@ def test_read_tabular_forwards_reader_options(tmp_path):
     assert result.get_column("value").to_list() == [1, 2]
 
 
-@pytest.mark.parametrize(
-    ("file_format", "separator"), [("csv", ","), ("tsv", "\t")]
-)
+@pytest.mark.parametrize(("file_format", "separator"), [("csv", ","), ("tsv", "\t")])
 def test_read_tabular_parses_dates_by_default(tmp_path, file_format, separator):
     path = tmp_path / f"dates.{file_format}"
     path.write_text(f"date{separator}value\n2026-01-15{separator}1\n")
