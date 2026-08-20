@@ -87,6 +87,9 @@ def write_tabular(table: pl.DataFrame, path_to_file: str | Path, **kwargs: Any) 
     """
     file_format = Path(path_to_file).suffix.removeprefix(".").lower()
 
+    if file_format in {"csv", "tsv"}:
+        kwargs.setdefault("null_value", "NA")
+
     if file_format == "csv":
         table.write_csv(path_to_file, **kwargs)
         return
