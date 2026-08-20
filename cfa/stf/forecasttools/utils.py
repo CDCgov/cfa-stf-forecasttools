@@ -63,9 +63,7 @@ def read_tabular(path_to_file: str | Path, **kwargs: Any) -> pl.DataFrame:
     )
 
 
-def write_tabular(
-    table: pl.DataFrame, path_to_file: str | Path, **kwargs: Any
-) -> None:
+def write_tabular(table: pl.DataFrame, path_to_file: str | Path, **kwargs: Any) -> None:
     """Write a table, inferring its format from the file extension.
 
     Parameters
