@@ -63,6 +63,49 @@ def read_tabular(path_to_file: str | Path, **kwargs: Any) -> pl.DataFrame:
     )
 
 
+def write_tabular(
+    table: pl.DataFrame, path_to_file: str | Path, **kwargs: Any
+) -> None:
+    """Write a table, inferring its format from the file extension.
+
+    Parameters
+    ----------
+    table
+        Polars DataFrame to write.
+    path_to_file
+        Path to a ``.csv``, ``.tsv``, or ``.parquet`` file. The extension is
+        matched case-insensitively.
+    **kwargs
+        Additional keyword arguments passed to
+        :meth:`polars.DataFrame.write_csv` or
+        :meth:`polars.DataFrame.write_parquet`, depending on the inferred
+        format.
+
+    Raises
+    ------
+    ValueError
+        If the path does not have a supported file extension.
+    """
+    file_format = Path(path_to_file).suffix.removeprefix(".").lower()
+
+    if file_format == "csv":
+        table.write_csv(path_to_file, **kwargs)
+        return
+    if file_format == "tsv":
+        kwargs.setdefault("separator", "\t")
+        table.write_csv(path_to_file, **kwargs)
+        return
+    if file_format == "parquet":
+        table.write_parquet(path_to_file, **kwargs)
+        return
+
+    supported_formats = ".csv, .tsv, and .parquet"
+    raise ValueError(
+        f"Unsupported file extension {Path(path_to_file).suffix!r}; "
+        f"expected one of {supported_formats}."
+    )
+
+
 def coalesce_common_columns(
     df: pl.DataFrame, suffix: str, new_colname: str | None = None
 ) -> pl.DataFrame:
