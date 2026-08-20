@@ -66,6 +66,26 @@ def test_read_tabular_allows_disabling_date_parsing(tmp_path):
     assert result.get_column("date").to_list() == ["2026-01-15"]
 
 
+@pytest.mark.parametrize("file_format", ["csv", "tsv"])
+def test_read_tabular_treats_na_as_null_by_default(tmp_path, file_format):
+    path = tmp_path / f"data.{file_format}"
+    separator = "," if file_format == "csv" else "\t"
+    path.write_text(f"location{separator}value\nUS{separator}NA\n")
+
+    result = ft.read_tabular(path)
+
+    assert result.get_column("value").to_list() == [None]
+
+
+def test_read_tabular_allows_overriding_null_values(tmp_path):
+    path = tmp_path / "data.csv"
+    path.write_text("value\nNA\n")
+
+    result = ft.read_tabular(path, null_values="missing")
+
+    assert result.get_column("value").to_list() == ["NA"]
+
+
 def test_read_tabular_corrects_timezone_naive_parquet_timestamps(tmp_path):
     path = tmp_path / "timestamps.parquet"
     tokyo = ZoneInfo("Asia/Tokyo")

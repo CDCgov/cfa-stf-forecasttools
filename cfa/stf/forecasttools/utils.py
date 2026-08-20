@@ -47,6 +47,7 @@ def read_tabular(path_to_file: str | Path, **kwargs: Any) -> pl.DataFrame:
 
     if file_format in {"csv", "tsv"}:
         kwargs.setdefault("try_parse_dates", True)
+        kwargs.setdefault("null_values", "NA")
 
     if file_format == "csv":
         return pl.read_csv(path_to_file, **kwargs)
