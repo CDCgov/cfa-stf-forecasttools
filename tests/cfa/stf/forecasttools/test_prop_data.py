@@ -1,100 +1,96 @@
+import datetime
+
 import polars as pl
-import polars.testing as plt
 import pytest
 
 import cfa.stf.forecasttools as ft
 
 
-def test_append_prop_data_appends_proportion_rows():
-    data = pl.DataFrame(
+def test_augment_samples_with_observations_adds_training_draws():
+    forecast_date = datetime.date(2026, 1, 8)
+    observation_dates = [datetime.date(2026, 1, 6), datetime.date(2026, 1, 7)]
+    samples = pl.DataFrame(
         {
-            "date": [
-                "2024-01-02",
-                "2024-01-01",
-                "2024-01-01",
-                "2024-01-02",
-                "2024-01-01",
-            ],
-            "location": ["US", "US", "US", "US", "US"],
-            ".variable": [
-                "other_ed_visits",
-                "observed_ed_visits",
-                "other_ed_visits",
-                "observed_ed_visits",
-                "some_other_variable",
-            ],
-            ".value": [70, 20, 80, 30, 999],
+            "date": [forecast_date, forecast_date],
+            "location": ["US", "US"],
+            "resolution": ["daily", "daily"],
+            "data_type": ["forecast", "forecast"],
+            ".draw": [0, 1],
+            "cases": [20.0, 30.0],
+        }
+    )
+    observations = pl.DataFrame(
+        {
+            "date": observation_dates,
+            "location": ["US", "US"],
+            "resolution": ["daily", "daily"],
+            "cases": [10.0, 20.0],
         }
     )
 
-    result = ft.append_prop_data(data)
+    result = ft.augment_samples_with_observations(samples, observations).sort(
+        "date", ".draw"
+    )
 
-    expected = pl.DataFrame(
+    assert result.select("date", ".draw", "data_type", "cases").rows() == [
+        (observation_dates[0], 0, "train", 10.0),
+        (observation_dates[0], 1, "train", 10.0),
+        (observation_dates[1], 0, "train", 20.0),
+        (observation_dates[1], 1, "train", 20.0),
+        (forecast_date, 0, "forecast", 20.0),
+        (forecast_date, 1, "forecast", 30.0),
+    ]
+
+
+def test_augment_samples_with_observations_rejects_mismatched_resolution():
+    samples = pl.DataFrame(
         {
-            "date": [
-                "2024-01-01",
-                "2024-01-01",
-                "2024-01-01",
-                "2024-01-01",
-                "2024-01-02",
-                "2024-01-02",
-                "2024-01-02",
-            ],
-            "location": ["US", "US", "US", "US", "US", "US", "US"],
-            ".variable": [
-                "observed_ed_visits",
-                "other_ed_visits",
-                "prop_disease_ed_visits",
-                "some_other_variable",
-                "observed_ed_visits",
-                "other_ed_visits",
-                "prop_disease_ed_visits",
-            ],
-            ".value": [20.0, 80.0, 0.2, 999.0, 30.0, 70.0, 0.3],
+            "date": [datetime.date(2026, 1, 8)],
+            "resolution": ["daily"],
+            ".draw": [0],
+            "cases": [1.0],
         }
     )
-    plt.assert_frame_equal(result, expected)
-
-
-def test_append_prop_data_preserves_additional_identifier_columns():
-    data = pl.DataFrame(
+    observations = pl.DataFrame(
         {
-            "date": ["2024-01-01", "2024-01-01", "2024-01-01", "2024-01-01"],
-            "location": ["CA", "CA", "NY", "NY"],
-            "age_group": ["all", "all", "all", "all"],
-            ".variable": [
-                "observed_ed_visits",
-                "other_ed_visits",
-                "observed_ed_visits",
-                "other_ed_visits",
-            ],
-            ".value": [1, 3, 4, 6],
+            "date": [datetime.date(2026, 1, 7)],
+            "resolution": ["epiweekly"],
+            "cases": [1.0],
         }
     )
 
-    result = ft.append_prop_data(data).filter(
-        pl.col(".variable") == "prop_disease_ed_visits"
-    )
+    with pytest.raises(ValueError, match="same resolution"):
+        ft.augment_samples_with_observations(samples, observations)
 
-    expected = pl.DataFrame(
+
+def test_create_proportions_joins_shared_identifiers():
+    dates = [datetime.date(2026, 1, 7), datetime.date(2026, 1, 8)]
+    numerator = pl.DataFrame(
         {
-            "date": ["2024-01-01", "2024-01-01"],
-            "location": ["CA", "NY"],
-            "age_group": ["all", "all"],
-            ".variable": ["prop_disease_ed_visits", "prop_disease_ed_visits"],
-            ".value": [0.25, 0.4],
+            "date": dates,
+            "location": ["US", "US"],
+            ".draw": [0, 0],
+            "observed_ed_visits": [20.0, 30.0],
         }
     )
-    plt.assert_frame_equal(result, expected)
-
-
-def test_append_prop_data_errors_when_required_column_is_missing():
-    data = pl.DataFrame(
+    other = pl.DataFrame(
         {
-            "date": ["2024-01-01"],
-            ".variable": ["observed_ed_visits"],
+            "date": dates,
+            "location": ["US", "US"],
+            ".draw": [0, 0],
+            "other_ed_visits": [80.0, 70.0],
         }
     )
 
-    with pytest.raises(ValueError, match=r"\.value"):
-        ft.append_prop_data(data)
+    result = ft.create_proportions(
+        numerator,
+        other,
+        "observed_ed_visits",
+        "other_ed_visits",
+    )
+
+    assert result.get_column(".value").to_list() == [0.2, 0.3]
+    assert result.get_column(".variable").to_list() == [
+        "prop_disease_ed_visits",
+        "prop_disease_ed_visits",
+    ]
