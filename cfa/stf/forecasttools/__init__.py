@@ -11,11 +11,9 @@ from .aggregate_to_weekly import (
     floor_mmwr_epiweek,
     floor_week,
 )
+from .augment_samples_with_observations import augment_samples_with_observations
+from .create_proportions import create_proportions
 from .location_table import LOCATION_LIST
-from .prop_data import (
-    augment_samples_with_observations,
-    create_proportions,
-)
 from .utils import coalesce_common_columns
 
 
