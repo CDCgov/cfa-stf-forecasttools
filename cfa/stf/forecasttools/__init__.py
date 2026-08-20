@@ -15,7 +15,7 @@ from .append_prop_data import append_prop_data
 from .augment_samples_with_observations import augment_samples_with_observations
 from .create_proportions import create_proportions
 from .location_table import LOCATION_LIST
-from .utils import coalesce_common_columns
+from .utils import coalesce_common_columns, read_tabular
 
 
 def __getattr__(name):
@@ -28,6 +28,7 @@ def __getattr__(name):
 
 __all__ = [
     "coalesce_common_columns",
+    "read_tabular",
     "append_prop_data",
     "augment_samples_with_observations",
     "create_proportions",
