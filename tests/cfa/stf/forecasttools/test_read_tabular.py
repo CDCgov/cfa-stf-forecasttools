@@ -114,6 +114,26 @@ def test_read_tabular_corrects_timezone_naive_parquet_timestamps(tmp_path):
     ).row(0)
 
 
+@pytest.mark.parametrize("file_format", ["csv", "tsv"])
+def test_write_tabular_writes_na_for_null_by_default(tmp_path, file_format):
+    path = tmp_path / f"data.{file_format}"
+    data = pl.DataFrame({"location": ["US"], "value": [None]})
+
+    ft.write_tabular(data, path)
+
+    separator = "," if file_format == "csv" else "\t"
+    assert path.read_text() == f"location{separator}value\nUS{separator}NA\n"
+
+
+def test_write_tabular_allows_overriding_null_value(tmp_path):
+    path = tmp_path / "data.csv"
+    data = pl.DataFrame({"value": [None]})
+
+    ft.write_tabular(data, path, null_value="missing")
+
+    assert path.read_text() == "value\nmissing\n"
+
+
 @pytest.mark.parametrize("filename", ["data.json", "data"])
 def test_read_tabular_rejects_unsupported_extensions(tmp_path, filename):
     path = tmp_path / filename
