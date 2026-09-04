@@ -378,18 +378,33 @@ def _build_quantile_output(
     quantile_levels: Sequence[float],
 ) -> pl.DataFrame:
     """Aggregate mapped task rows into Hubverse quantile output."""
-    quantile_rows = pl.concat(
-        [
-            task_rows.group_by(_TASK_COLUMNS)
-            .agg(
-                pl.col("value").quantile(level, interpolation="linear").cast(pl.Float64)
+    quantile_columns = [f"_quantile_{index}" for index, _ in enumerate(quantile_levels)]
+    quantile_ids = dict(zip(quantile_columns, quantile_levels, strict=True))
+    quantile_rows = (
+        task_rows.group_by(_TASK_COLUMNS)
+        .agg(
+            pl.col("value")
+            .quantile(level, interpolation="linear")
+            .cast(pl.Float64)
+            .alias(column)
+            for column, level in zip(
+                quantile_columns,
+                quantile_levels,
+                strict=True,
             )
-            .with_columns(
-                pl.lit("quantile").alias("output_type"),
-                pl.lit(level, dtype=pl.Float64).alias("output_type_id"),
-            )
-            for level in quantile_levels
-        ]
+        )
+        .unpivot(
+            on=quantile_columns,
+            index=_TASK_COLUMNS,
+            variable_name="_quantile_column",
+            value_name="value",
+        )
+        .with_columns(
+            pl.lit("quantile").alias("output_type"),
+            pl.col("_quantile_column")
+            .replace_strict(quantile_ids, return_dtype=pl.Float64)
+            .alias("output_type_id"),
+        )
     )
     return quantile_rows.select(
         *_TASK_COLUMNS,
