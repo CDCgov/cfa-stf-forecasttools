@@ -1,4 +1,4 @@
-"""Convert forecast samples to Hubverse model-output tables."""
+"""Convert scaffold predictive-draw tables to Hubverse model output."""
 
 import datetime
 import math
@@ -52,20 +52,11 @@ def _normalize_samples(
     if len(set(source_columns.values())) != len(source_columns):
         raise ValueError("source column names must be distinct")
 
-    expected = set(source_columns.values())
+    required = set(source_columns.values())
     actual = set(samples.columns)
-    if actual != expected:
-        details = []
-        missing = sorted(expected - actual)
-        extra = sorted(actual - expected)
-        if missing:
-            details.append(f"missing: {missing}")
-        if extra:
-            details.append(f"extra: {extra}")
-        raise ValueError(
-            "samples must contain exactly the configured source columns "
-            f"({'; '.join(details)})"
-        )
+    missing = sorted(required - actual)
+    if missing:
+        raise ValueError(f"samples are missing required source columns: {missing}")
 
     normalized = samples.select(
         pl.col(source).alias(canonical) for canonical, source in source_columns.items()
@@ -84,14 +75,18 @@ def _normalize_samples(
         )
 
     schema = normalized.schema
-    if not schema["draw"].is_integer():
-        raise TypeError("draw column must have an integer type")
-    try:
-        normalized = normalized.with_columns(pl.col("draw").cast(pl.Int64))
-    except pl.exceptions.InvalidOperationError as error:
-        raise ValueError("draw values must fit in a signed 64-bit integer") from error
-    if normalized.select((pl.col("draw") < 0).any()).item():
-        raise ValueError("draw values must be nonnegative")
+    if schema["draw"].is_integer():
+        try:
+            normalized = normalized.with_columns(pl.col("draw").cast(pl.Int64))
+        except pl.exceptions.InvalidOperationError as error:
+            raise ValueError(
+                "integer draw values must fit in a signed 64-bit integer"
+            ) from error
+    elif schema["draw"] == pl.String:
+        if normalized.select(pl.col("draw").str.strip_chars().eq("").any()).item():
+            raise ValueError("string draw values must be nonempty")
+    else:
+        raise TypeError("draw column must have an integer or String type")
 
     if schema["date"] != pl.Date:
         raise TypeError("date column must have Polars Date type")
@@ -142,12 +137,12 @@ def _validate_date_spacing(
 
 def _validate_sample_coverage(samples: pl.DataFrame) -> None:
     """Validate coherent draw identities and dates across forecast series."""
-    expected_draws: list[int] | None = None
+    expected_draws: list[int | str] | None = None
     for series in samples.partition_by(
         ["location", "variable", "resolution"],
         maintain_order=False,
     ):
-        draws: list[int] = sorted(series.get_column("draw").unique().to_list())
+        draws: list[int | str] = series.get_column("draw").unique().sort().to_list()
         if expected_draws is None:
             expected_draws = draws
         elif draws != expected_draws:
@@ -171,33 +166,6 @@ def _validate_sample_coverage(samples: pl.DataFrame) -> None:
             raise ValueError("forecast series must not be empty")
         resolution: str = series.get_column("resolution").item(0)
         _validate_date_spacing(expected_dates, resolution=resolution)
-
-
-def _normalize_sample_ids(
-    samples: pl.DataFrame,
-    *,
-    source_draw_id_base: Literal[0, 1],
-) -> pl.DataFrame:
-    """Validate source draw IDs and return one-based Hubverse sample IDs."""
-    if isinstance(source_draw_id_base, bool) or not isinstance(
-        source_draw_id_base, int
-    ):
-        raise TypeError("source_draw_id_base must be an integer")
-    if source_draw_id_base not in (0, 1):
-        raise ValueError("source_draw_id_base must be either 0 or 1")
-
-    draw_ids: list[int] = sorted(samples.get_column("draw").unique().to_list())
-    expected_draw_ids = list(
-        range(source_draw_id_base, source_draw_id_base + len(draw_ids))
-    )
-    if draw_ids != expected_draw_ids:
-        raise ValueError(
-            "draw values must be contiguous and start at source_draw_id_base"
-        )
-
-    return samples.with_columns(
-        (pl.col("draw") - source_draw_id_base + 1).alias("draw")
-    )
 
 
 def _normalize_reference_date(reference_date: datetime.date) -> datetime.date:
@@ -399,7 +367,7 @@ def _build_sample_output(task_rows: pl.DataFrame) -> pl.DataFrame:
     return task_rows.select(
         *_TASK_COLUMNS,
         pl.lit("sample").alias("output_type"),
-        pl.col("draw").cast(pl.Int64).alias("output_type_id"),
+        pl.col("draw").alias("output_type_id"),
         pl.col("value").cast(pl.Float64),
     )
 
@@ -463,7 +431,6 @@ def samples_to_hubverse(
     target_map: Mapping[tuple[str, str], str],
     location_map: Mapping[str, str],
     horizon_unit: Literal["days", "weeks"],
-    source_draw_id_base: Literal[0, 1] = 0,
     draw_col: str = "draw",
     date_col: str = "date",
     location_col: str = "location",
@@ -476,8 +443,13 @@ def samples_to_hubverse(
     Parameters
     ----------
     samples
-        Forecast draws with columns for draw, date, location, variable, value,
-        and resolution.
+        The scaffold's predictive-draw table. It must contain columns for draw,
+        date, location, variable, value, and resolution. Other columns are
+        ignored. Draw identifiers may be integers or strings; dates must be
+        Polars Date values; locations, variables, and resolutions must be
+        strings; and forecast values must be finite numbers. Resolutions must
+        be ``"daily"`` or ``"weekly"``. Draw identifiers are preserved as
+        Hubverse sample identifiers.
     reference_date
         Date from which forecast horizons are calculated.
     target_map
@@ -488,10 +460,6 @@ def samples_to_hubverse(
         Unit used to calculate horizons. Must be "days" or "weeks". Week
         horizons require every target date to be an exact multiple of seven
         days from the reference date.
-    source_draw_id_base
-        First source draw ID. Source IDs must be contiguous and start at zero
-        or one. Hubverse sample IDs are always returned as one through N;
-        zero-based source IDs are shifted by one.
     draw_col
         Name of the source draw column.
     date_col
@@ -509,7 +477,8 @@ def samples_to_hubverse(
     -------
     pl.DataFrame
         Hubverse sample rows with task columns followed by output_type,
-        output_type_id, and value.
+        output_type_id, and value. Integer sample identifiers have Polars Int64
+        type; string identifiers have Polars String type.
 
     Raises
     ------
@@ -528,10 +497,6 @@ def samples_to_hubverse(
         resolution_col=resolution_col,
     )
     _validate_sample_coverage(normalized)
-    normalized = _normalize_sample_ids(
-        normalized,
-        source_draw_id_base=source_draw_id_base,
-    )
     normalized_reference_date = _normalize_reference_date(reference_date)
     _validate_horizon_unit(horizon_unit)
     normalized_targets, normalized_locations = _normalize_mappings(
@@ -549,7 +514,7 @@ def samples_to_hubverse(
     _validate_task_row_keys(task_rows)
     return _finalize_output(
         _build_sample_output(task_rows),
-        output_type_id_dtype=pl.Int64,
+        output_type_id_dtype=normalized.schema["draw"],
     )
 
 
@@ -573,8 +538,12 @@ def samples_to_hubverse_quantiles(
     Parameters
     ----------
     samples
-        Forecast draws with columns for draw, date, location, variable, value,
-        and resolution.
+        The scaffold's predictive-draw table. It must contain columns for draw,
+        date, location, variable, value, and resolution. Other columns are
+        ignored. Draw identifiers may be integers or strings; dates must be
+        Polars Date values; locations, variables, and resolutions must be
+        strings; and forecast values must be finite numbers. Resolutions must
+        be ``"daily"`` or ``"weekly"``.
     reference_date
         Date from which forecast horizons are calculated.
     target_map

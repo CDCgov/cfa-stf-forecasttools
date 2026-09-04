@@ -16,7 +16,6 @@ from cfa.stf.forecasttools.hubverse import (
     _normalize_mappings,
     _normalize_quantile_levels,
     _normalize_reference_date,
-    _normalize_sample_ids,
     _normalize_samples,
     _validate_horizon_unit,
     _validate_sample_coverage,
@@ -173,7 +172,7 @@ def _representative_samples() -> pl.DataFrame:
 
 
 def test_normalize_samples_uses_canonical_names_and_types() -> None:
-    """Canonical input is selected in order and draw IDs become Int64."""
+    """Canonical input is selected in order and integer draw IDs become Int64."""
     result = _normalize(_valid_samples().select(reversed(_valid_samples().columns)))
 
     assert result.columns == [
@@ -263,23 +262,19 @@ def test_normalize_samples_requires_distinct_column_names() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    ("samples", "message"),
-    [
-        (_valid_samples().drop("value"), "missing: \\['value'\\]"),
-        (
-            _valid_samples().with_columns(pl.lit("model").alias("model")),
-            "extra: \\['model'\\]",
-        ),
-    ],
-)
-def test_normalize_samples_requires_exact_source_columns(
-    samples: pl.DataFrame,
-    message: str,
-) -> None:
-    """Missing and extra source columns are reported."""
-    with pytest.raises(ValueError, match=message):
-        _normalize(samples)
+def test_normalize_samples_requires_source_columns() -> None:
+    """Missing required source columns are reported."""
+    with pytest.raises(ValueError, match="missing.*\\['value'\\]"):
+        _normalize(_valid_samples().drop("value"))
+
+
+def test_normalize_samples_ignores_extra_columns() -> None:
+    """Columns outside the predictive-draw contract are ignored."""
+    samples = _valid_samples().with_columns(pl.lit("model-a").alias("model"))
+
+    result = _normalize(samples)
+
+    assert result.equals(_normalize(_valid_samples()))
 
 
 def test_normalize_samples_rejects_empty_table() -> None:
@@ -308,7 +303,7 @@ def test_normalize_samples_rejects_nulls(column: str) -> None:
 @pytest.mark.parametrize(
     ("column", "dtype", "message"),
     [
-        ("draw", pl.Float64, "draw column must have an integer type"),
+        ("draw", pl.Float64, "draw column must have an integer or String type"),
         ("date", pl.Datetime, "date column must have Polars Date type"),
         ("location", pl.Categorical, "location column must have Polars String type"),
         ("variable", pl.Categorical, "variable column must have Polars String type"),
@@ -344,8 +339,8 @@ def test_normalize_samples_rejects_draw_above_int64_range() -> None:
         _normalize(samples)
 
 
-def test_normalize_samples_rejects_negative_draw() -> None:
-    """Draw IDs must be nonnegative."""
+def test_normalize_samples_preserves_negative_draw() -> None:
+    """Integer draw IDs are identifiers and may be negative."""
     samples = _valid_samples().with_columns(
         pl.when(pl.int_range(pl.len()) == 0)
         .then(-1)
@@ -353,7 +348,15 @@ def test_normalize_samples_rejects_negative_draw() -> None:
         .alias("draw")
     )
 
-    with pytest.raises(ValueError, match="draw values must be nonnegative"):
+    assert _normalize(samples).get_column("draw").to_list()[0] == -1
+
+
+@pytest.mark.parametrize("value", ["", "  "])
+def test_normalize_samples_rejects_empty_string_draw(value: str) -> None:
+    """String draw identifiers must contain visible text."""
+    samples = _valid_samples().with_columns(pl.lit(value).alias("draw"))
+
+    with pytest.raises(ValueError, match="string draw values must be nonempty"):
         _normalize(samples)
 
 
@@ -1026,7 +1029,7 @@ def test_samples_to_hubverse_returns_sample_output() -> None:
             datetime.date(2026, 1, 1),
             "59",
             "sample",
-            1,
+            0,
             1.0,
         ),
         (
@@ -1036,7 +1039,7 @@ def test_samples_to_hubverse_returns_sample_output() -> None:
             datetime.date(2026, 1, 2),
             "59",
             "sample",
-            1,
+            0,
             2.0,
         ),
         (
@@ -1046,7 +1049,7 @@ def test_samples_to_hubverse_returns_sample_output() -> None:
             datetime.date(2026, 1, 1),
             "59",
             "sample",
-            2,
+            1,
             3.0,
         ),
         (
@@ -1056,7 +1059,7 @@ def test_samples_to_hubverse_returns_sample_output() -> None:
             datetime.date(2026, 1, 2),
             "59",
             "sample",
-            2,
+            1,
             4.0,
         ),
     ]
@@ -1094,73 +1097,40 @@ def test_samples_to_hubverse_supports_aliases_in_public_api() -> None:
     assert result.equals(expected)
 
 
-def test_samples_to_hubverse_accepts_one_based_source_draw_ids() -> None:
-    """One-based source draws remain one-based in Hubverse output."""
-    one_based_samples = _valid_samples().with_columns(pl.col("draw") + 1)
+def test_samples_to_hubverse_preserves_noncontiguous_draw_ids() -> None:
+    """Integer source draw IDs are preserved without rebasing."""
+    samples = _valid_samples().with_columns(pl.col("draw").replace({0: 2, 1: 7}))
 
     result = ft.samples_to_hubverse(
-        one_based_samples,
-        reference_date=datetime.date(2026, 1, 1),
-        target_map={("admissions", "daily"): "inc admissions"},
-        location_map={"US": "59"},
-        horizon_unit="days",
-        source_draw_id_base=1,
-    )
-    expected = ft.samples_to_hubverse(
-        _valid_samples(),
+        samples,
         reference_date=datetime.date(2026, 1, 1),
         target_map={("admissions", "daily"): "inc admissions"},
         location_map={"US": "59"},
         horizon_unit="days",
     )
 
-    assert result.equals(expected)
+    assert result.get_column("output_type_id").unique().sort().to_list() == [2, 7]
 
 
-@pytest.mark.parametrize("source_draw_id_base", [-1, 2])
-def test_normalize_sample_ids_rejects_unsupported_base(
-    source_draw_id_base: int,
-) -> None:
-    """Only zero-based and one-based source draw conventions are supported."""
-    with pytest.raises(ValueError, match="must be either 0 or 1"):
-        _normalize_sample_ids(
-            _normalize(_valid_samples()),
-            source_draw_id_base=cast(Literal[0, 1], source_draw_id_base),
-        )
-
-
-@pytest.mark.parametrize("source_draw_id_base", [True, 0.0, "0"])
-def test_normalize_sample_ids_rejects_noninteger_base(
-    source_draw_id_base: object,
-) -> None:
-    """A source draw base must be supplied as an integer."""
-    with pytest.raises(TypeError, match="must be an integer"):
-        _normalize_sample_ids(
-            _normalize(_valid_samples()),
-            source_draw_id_base=cast(Literal[0, 1], source_draw_id_base),
-        )
-
-
-@pytest.mark.parametrize(
-    ("draw_ids", "source_draw_id_base"),
-    [([1, 2], 0), ([0, 2], 0), ([1, 3], 1)],
-)
-def test_normalize_sample_ids_rejects_inconsistent_sequences(
-    draw_ids: list[int],
-    source_draw_id_base: Literal[0, 1],
-) -> None:
-    """Source draw IDs must start at the declared base without gaps."""
-    samples = _normalize(
-        _valid_samples().with_columns(
-            pl.col("draw").replace({0: draw_ids[0], 1: draw_ids[1]})
-        )
+def test_samples_to_hubverse_preserves_string_draw_ids() -> None:
+    """String source draw IDs become unchanged Hubverse sample IDs."""
+    samples = _valid_samples().with_columns(
+        pl.col("draw").replace_strict({0: "sample-a", 1: "sample-b"})
     )
 
-    with pytest.raises(ValueError, match="contiguous and start"):
-        _normalize_sample_ids(
-            samples,
-            source_draw_id_base=source_draw_id_base,
-        )
+    result = ft.samples_to_hubverse(
+        samples,
+        reference_date=datetime.date(2026, 1, 1),
+        target_map={("admissions", "daily"): "inc admissions"},
+        location_map={"US": "59"},
+        horizon_unit="days",
+    )
+
+    assert result.schema["output_type_id"] == pl.String
+    assert result.get_column("output_type_id").unique().sort().to_list() == [
+        "sample-a",
+        "sample-b",
+    ]
 
 
 def test_samples_to_hubverse_normalizes_datetime_reference() -> None:
@@ -1259,10 +1229,10 @@ def test_samples_to_hubverse_sorts_by_output_key() -> None:
     )
 
     assert result.select("horizon", "output_type_id").rows() == [
+        (0, 0),
         (0, 1),
-        (0, 2),
+        (1, 0),
         (1, 1),
-        (1, 2),
     ]
 
 
@@ -1434,7 +1404,7 @@ def test_sample_converter_handles_representative_multitask_table() -> None:
         .agg(pl.col("output_type_id").sort())
         .get_column("output_type_id")
         .to_list()
-        == [[1, 2]] * 8
+        == [[0, 1]] * 8
     )
     assert result.get_column("value").sort().to_list() == [
         0.0,
@@ -1511,7 +1481,7 @@ def test_sample_converter_handles_generated_pyrenew_output() -> None:
 
     assert samples.shape == (48, 6)
     assert result.shape == (48, 8)
-    assert result.get_column("output_type_id").unique().sort().to_list() == [1, 2, 3]
+    assert result.get_column("output_type_id").unique().sort().to_list() == [0, 1, 2]
     assert result.select("target", "horizon").unique().group_by("target").agg(
         pl.col("horizon").sort()
     ).sort("target").rows() == [
@@ -1521,9 +1491,9 @@ def test_sample_converter_handles_generated_pyrenew_output() -> None:
     assert result.filter(
         (pl.col("target") == "inc COVID-19 ed visits") & (pl.col("horizon") == 1)
     ).select("output_type_id", "value").rows() == [
-        (1, 455.0),
-        (2, 587.0),
-        (3, 443.0),
+        (0, 455.0),
+        (1, 587.0),
+        (2, 443.0),
     ]
 
 
@@ -1564,7 +1534,6 @@ def test_sample_conversion_matches_r_golden_output() -> None:
         },
         location_map={"CA": "CA"},
         horizon_unit="days",
-        source_draw_id_base=1,
         draw_col=".draw",
         location_col="geo_value",
         variable_col=".variable",
