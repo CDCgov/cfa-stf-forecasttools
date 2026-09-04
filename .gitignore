@@ -1,6 +1,10 @@
 *.csv
+!tests/cfa/stf/forecasttools/test_data/r_hubverse_parity_input.csv
+!tests/cfa/stf/forecasttools/test_data/r_hubverse_sample_expected.csv
+!tests/cfa/stf/forecasttools/test_data/r_hubverse_quantile_expected.csv
 *.tsv
 *.parquet
+!tests/cfa/stf/forecasttools/test_data/pyrenew_he_samples_3_draws.parquet
 *.dat
 *.bin
 *.xls

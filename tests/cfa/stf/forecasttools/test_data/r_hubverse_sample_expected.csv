@@ -1,0 +1,13 @@
+"reference_date","target","horizon","target_end_date","location","output_type","output_type_id","value"
+2025-01-28,"inc covid ed visits",1,2025-01-29,"CA","sample",1,10
+2025-01-28,"inc covid ed visits",1,2025-01-29,"CA","sample",2,20
+2025-01-28,"inc covid ed visits",1,2025-01-29,"CA","sample",3,50
+2025-01-28,"inc covid ed visits",2,2025-01-30,"CA","sample",1,13
+2025-01-28,"inc covid ed visits",2,2025-01-30,"CA","sample",2,23
+2025-01-28,"inc covid ed visits",2,2025-01-30,"CA","sample",3,53
+2025-01-28,"wk inc covid hosp",4,2025-02-01,"CA","sample",1,100
+2025-01-28,"wk inc covid hosp",4,2025-02-01,"CA","sample",2,200
+2025-01-28,"wk inc covid hosp",4,2025-02-01,"CA","sample",3,500
+2025-01-28,"wk inc covid hosp",11,2025-02-08,"CA","sample",1,130
+2025-01-28,"wk inc covid hosp",11,2025-02-08,"CA","sample",2,230
+2025-01-28,"wk inc covid hosp",11,2025-02-08,"CA","sample",3,530

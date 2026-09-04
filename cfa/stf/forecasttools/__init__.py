@@ -14,6 +14,7 @@ from .aggregate_to_weekly import (
 from .append_prop_data import append_prop_data
 from .augment_samples_with_observations import augment_samples_with_observations
 from .create_proportions import create_proportions
+from .hubverse import samples_to_hubverse, samples_to_hubverse_quantiles
 from .location_table import LOCATION_LIST
 from .utils import coalesce_common_columns, read_tabular, write_tabular
 
@@ -33,6 +34,8 @@ __all__ = [
     "append_prop_data",
     "augment_samples_with_observations",
     "create_proportions",
+    "samples_to_hubverse",
+    "samples_to_hubverse_quantiles",
     "get_us_loc_pop_tbl",
     "LOCATION_LIST",
     "arviz",
