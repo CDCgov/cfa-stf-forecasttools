@@ -5,6 +5,7 @@ predictive sample. The observation is repeated for every sample in its forecast
 unit.
 
 ```python
+import numpy as np
 import polars as pl
 
 from cfa.stf.forecasttools import score_sample_crps
@@ -26,18 +27,24 @@ forecast_unit = ["model", "reference_date", "location", "target", "horizon"]
 natural_scores = score_sample_crps(
     forecasts,
     forecast_unit=forecast_unit,
-    scale="natural",
+    transform=None,
+    scale_name="natural",
 )
 log1p_scores = score_sample_crps(
     forecasts,
     forecast_unit=forecast_unit,
-    scale="log1p",
+    transform=np.log1p,
+    scale_name="log1p",
 )
 ```
 
 Each result contains the forecast-unit columns followed by `scale` and `crps`,
 with one row per forecast unit. Lower CRPS is better and zero is optimal. Scores
 from different scales must not be combined or directly compared.
+
+Set `transform=None` to score values as supplied. A transform must accept and
+return a same-shaped NumPy array containing finite real values. `scale_name`
+labels the transformed scale in the result.
 
 The function does not aggregate across forecast units. Averaging, weighting,
 and comparison with a baseline are downstream operations.

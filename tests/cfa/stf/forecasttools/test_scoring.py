@@ -1,4 +1,5 @@
 import datetime
+from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -7,8 +8,11 @@ import numpy as np
 import polars as pl
 import polars.testing as plt
 import pytest
+from numpy.typing import NDArray
 
 import cfa.stf.forecasttools as ft
+
+_ValueTransform = Callable[[NDArray[np.float64]], NDArray[np.float64]]
 
 SCORING_FIXTURE_DIR = (
     Path(__file__).resolve().parent / "test_data" / "scoringutils_crps"
@@ -46,7 +50,9 @@ def test_one_sample_crps_equals_absolute_error() -> None:
         }
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+    result = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
 
     assert result.item(0, "crps") == 3.0
 
@@ -54,7 +60,7 @@ def test_one_sample_crps_equals_absolute_error() -> None:
 def test_multi_sample_crps_matches_hand_calculation() -> None:
     """The scorer matches a hand-calculated empirical CRPS."""
     result = ft.score_sample_crps(
-        _base_forecasts(), forecast_unit=["unit"], scale="natural"
+        _base_forecasts(), forecast_unit=["unit"], transform=None, scale_name="natural"
     )
 
     assert result.item(0, "crps") == 0.5
@@ -77,10 +83,10 @@ def test_crps_is_stable_under_large_common_offsets() -> None:
     )
 
     unshifted_score = ft.score_sample_crps(
-        unshifted, forecast_unit=["unit"], scale="natural"
+        unshifted, forecast_unit=["unit"], transform=None, scale_name="natural"
     ).item(0, "crps")
     shifted_score = ft.score_sample_crps(
-        shifted, forecast_unit=["unit"], scale="natural"
+        shifted, forecast_unit=["unit"], transform=None, scale_name="natural"
     ).item(0, "crps")
 
     assert shifted_score == pytest.approx(unshifted_score)
@@ -95,7 +101,7 @@ def test_crps_is_stable_under_large_common_offsets() -> None:
         }
     )
     identical_score = ft.score_sample_crps(
-        identical, forecast_unit=["unit"], scale="natural"
+        identical, forecast_unit=["unit"], transform=None, scale_name="natural"
     ).item(0, "crps")
     assert identical_score == 0.0
 
@@ -111,7 +117,9 @@ def test_repeated_predicted_values_are_accepted() -> None:
         }
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+    result = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
 
     assert result.item(0, "crps") == 0.5
 
@@ -132,7 +140,8 @@ def test_multiple_models_are_scored_as_separate_forecast_units() -> None:
     result = ft.score_sample_crps(
         forecasts,
         forecast_unit=["model", "location"],
-        scale="natural",
+        transform=None,
+        scale_name="natural",
     )
 
     assert result.rows(named=True) == [
@@ -152,7 +161,9 @@ def test_units_may_have_different_sample_ids_and_counts() -> None:
         }
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+    result = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
 
     assert result.get_column("crps").to_list() == [1.0, 0.5]
 
@@ -171,7 +182,8 @@ def test_custom_column_names_are_supported() -> None:
     result = ft.score_sample_crps(
         forecasts,
         forecast_unit=["unit"],
-        scale="natural",
+        transform=None,
+        scale_name="natural",
         sample_id_col="draw",
         prediction_col="forecast",
         observation_col="truth",
@@ -191,8 +203,12 @@ def test_log1p_scale_transforms_values_before_scoring() -> None:
         }
     )
 
-    natural = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
-    log1p = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="log1p")
+    natural = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
+    log1p = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=np.log1p, scale_name="log1p"
+    )
 
     assert natural.item(0, "crps") == 0.75
     assert log1p.item(0, "crps") == pytest.approx(np.log(2.0) / 2.0)
@@ -211,7 +227,9 @@ def test_better_forecast_has_lower_crps() -> None:
         }
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+    result = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
 
     scores = dict(result.select("unit", "crps").iter_rows())
     assert scores["better"] < scores["worse"]
@@ -235,7 +253,8 @@ def test_output_schema_and_order_are_deterministic() -> None:
     result = ft.score_sample_crps(
         forecasts,
         forecast_unit=["reference_date", "model"],
-        scale="natural",
+        transform=None,
+        scale_name="natural",
     )
 
     assert result.columns == ["reference_date", "model", "scale", "crps"]
@@ -279,7 +298,9 @@ def test_numeric_columns_are_safely_converted_to_float64(
         }
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+    result = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
 
     assert result.item(0, "crps") == 0.5
     assert result.schema["crps"] == pl.Float64
@@ -301,7 +322,9 @@ def test_int64_values_that_lose_precision_in_float64_are_rejected(
     ).with_columns(pl.Series(column, [exactly_representable + 1], dtype=pl.Int64))
 
     with pytest.raises(ValueError, match=rf"{column!r}.*safely.*Float64"):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 def test_large_exactly_representable_int64_values_are_scored() -> None:
@@ -316,7 +339,9 @@ def test_large_exactly_representable_int64_values_are_scored() -> None:
         }
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+    result = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
 
     assert result.item(0, "crps") == 2.0
 
@@ -337,18 +362,22 @@ def test_decimal_values_that_lose_precision_in_float64_are_rejected() -> None:
     )
 
     with pytest.raises(ValueError, match="'predicted'.*safely.*Float64"):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 @pytest.mark.parametrize(
-    "scale,expected_filename",
+    "scale_name,transform,expected_filename",
     [
-        ("natural", "expected_natural.csv"),
-        ("log1p", "expected_log1p.csv"),
+        ("natural", None, "expected_natural.csv"),
+        ("log1p", np.log1p, "expected_log1p.csv"),
     ],
 )
 def test_crps_matches_pinned_scoringutils_fixture(
-    scale: Literal["natural", "log1p"], expected_filename: str
+    scale_name: Literal["natural", "log1p"],
+    transform: _ValueTransform | None,
+    expected_filename: str,
 ) -> None:
     """Python scores match results from pinned R package versions."""
     forecasts = pl.read_csv(SCORING_FIXTURE_DIR / "input.csv", try_parse_dates=True)
@@ -356,7 +385,12 @@ def test_crps_matches_pinned_scoringutils_fixture(
         SCORING_FIXTURE_DIR / expected_filename, try_parse_dates=True
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=FORECAST_UNIT, scale=scale)
+    result = ft.score_sample_crps(
+        forecasts,
+        forecast_unit=FORECAST_UNIT,
+        transform=transform,
+        scale_name=scale_name,
+    )
 
     plt.assert_frame_equal(result, expected, check_exact=False, abs_tol=1e-12)
 
@@ -364,7 +398,9 @@ def test_crps_matches_pinned_scoringutils_fixture(
 def test_empty_input_is_rejected() -> None:
     """A scorer call requires at least one sample row."""
     with pytest.raises(ValueError, match="at least one row"):
-        ft.score_sample_crps(pl.DataFrame(), forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            pl.DataFrame(), forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 def test_non_dataframe_input_is_rejected() -> None:
@@ -373,7 +409,8 @@ def test_non_dataframe_input_is_rejected() -> None:
         ft.score_sample_crps(
             cast(Any, {"unit": ["a"]}),
             forecast_unit=["unit"],
-            scale="natural",
+            transform=None,
+            scale_name="natural",
         )
 
 
@@ -385,7 +422,9 @@ def test_missing_columns_are_rejected(missing_column: str) -> None:
     forecasts = _base_forecasts().drop(missing_column)
 
     with pytest.raises(ValueError, match=missing_column):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 @pytest.mark.parametrize(
@@ -416,7 +455,8 @@ def test_invalid_forecast_unit_is_rejected(
         ft.score_sample_crps(
             forecasts,
             forecast_unit=cast(Any, forecast_unit),
-            scale="natural",
+            transform=None,
+            scale_name="natural",
         )
 
 
@@ -440,7 +480,8 @@ def test_invalid_value_column_names_are_rejected(
         ft.score_sample_crps(
             _base_forecasts(),
             forecast_unit=["unit"],
-            scale="natural",
+            transform=None,
+            scale_name="natural",
             **overrides,
         )
 
@@ -454,7 +495,9 @@ def test_nonnumeric_value_columns_are_rejected(
     forecasts = _base_forecasts().with_columns(pl.col(column).cast(dtype))
 
     with pytest.raises(TypeError, match="numeric, non-boolean"):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 @pytest.mark.parametrize("column", ["predicted", "observed"])
@@ -469,7 +512,9 @@ def test_invalid_value_data_are_rejected(
     error_match = "null" if invalid_value is None else "finite"
 
     with pytest.raises(ValueError, match=error_match):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 def test_null_sample_identifiers_are_rejected() -> None:
@@ -479,7 +524,9 @@ def test_null_sample_identifiers_are_rejected() -> None:
     )
 
     with pytest.raises(ValueError, match="must not contain null"):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 def test_duplicate_sample_identifiers_within_unit_are_rejected() -> None:
@@ -487,7 +534,9 @@ def test_duplicate_sample_identifiers_within_unit_are_rejected() -> None:
     forecasts = _base_forecasts().with_columns(pl.lit(0).alias("sample_id"))
 
     with pytest.raises(ValueError, match="unique within each forecast unit"):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
 def test_same_sample_identifier_across_units_is_accepted() -> None:
@@ -501,7 +550,9 @@ def test_same_sample_identifier_across_units_is_accepted() -> None:
         }
     )
 
-    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+    result = ft.score_sample_crps(
+        forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+    )
 
     assert result.height == 2
 
@@ -511,24 +562,87 @@ def test_inconsistent_observations_are_rejected() -> None:
     forecasts = _base_forecasts().with_columns(pl.Series("observed", [1.0, 2.0]))
 
     with pytest.raises(ValueError, match="exactly one observation"):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+        ft.score_sample_crps(
+            forecasts, forecast_unit=["unit"], transform=None, scale_name="natural"
+        )
 
 
-def test_invalid_scale_is_rejected() -> None:
-    """Only the documented natural and log1p scales are accepted."""
-    with pytest.raises(ValueError, match="scale must be"):
+@pytest.mark.parametrize(
+    "scale_name,error_type",
+    [
+        ("", ValueError),
+        (1, TypeError),
+    ],
+)
+def test_invalid_scale_name_is_rejected(
+    scale_name: Any, error_type: type[Exception]
+) -> None:
+    """The output scale label must be a nonempty string."""
+    with pytest.raises(error_type, match="scale_name"):
         ft.score_sample_crps(
             _base_forecasts(),
             forecast_unit=["unit"],
-            scale=cast(Any, "log"),
+            transform=None,
+            scale_name=scale_name,
+        )
+
+
+def test_noncallable_transform_is_rejected() -> None:
+    """A transform must be callable when it is supplied."""
+    with pytest.raises(TypeError, match="transform must be callable"):
+        ft.score_sample_crps(
+            _base_forecasts(),
+            forecast_unit=["unit"],
+            transform=cast(Any, "log1p"),
+            scale_name="log1p",
         )
 
 
 @pytest.mark.parametrize("column", ["predicted", "observed"])
 @pytest.mark.parametrize("invalid_value", [-1.0, -2.0])
-def test_log1p_rejects_values_outside_domain(column: str, invalid_value: float) -> None:
-    """Log1p scoring requires every scored value to be greater than -1."""
-    forecasts = _base_forecasts().with_columns(pl.Series(column, [0.0, invalid_value]))
+def test_transform_rejects_nonfinite_results(column: str, invalid_value: float) -> None:
+    """A transform must return finite predictions and observations."""
+    invalid_values = (
+        [invalid_value, invalid_value] if column == "observed" else [0.0, invalid_value]
+    )
+    forecasts = _base_forecasts().with_columns(pl.Series(column, invalid_values))
 
-    with pytest.raises(ValueError, match="greater than -1"):
-        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="log1p")
+    with pytest.raises(ValueError, match=rf"finite values for {column!r}"):
+        ft.score_sample_crps(
+            forecasts,
+            forecast_unit=["unit"],
+            transform=np.log1p,
+            scale_name="log1p",
+        )
+
+
+def test_transform_must_preserve_input_shape() -> None:
+    """A transform must return one value for each supplied value."""
+
+    def remove_last(values: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Return an invalid shortened array."""
+        return values[:-1]
+
+    with pytest.raises(ValueError, match="preserve the shape"):
+        ft.score_sample_crps(
+            _base_forecasts(),
+            forecast_unit=["unit"],
+            transform=remove_last,
+            scale_name="shortened",
+        )
+
+
+def test_transform_must_return_numeric_values() -> None:
+    """A transform must return real numeric values."""
+
+    def stringify(values: NDArray[np.float64]) -> NDArray[np.str_]:
+        """Return an invalid string array."""
+        return values.astype(np.str_)
+
+    with pytest.raises(TypeError, match="real numeric values"):
+        ft.score_sample_crps(
+            _base_forecasts(),
+            forecast_unit=["unit"],
+            transform=cast(Any, stringify),
+            scale_name="string",
+        )

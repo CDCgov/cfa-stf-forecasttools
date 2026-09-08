@@ -1,11 +1,12 @@
-from collections.abc import Sequence
-from typing import Literal
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import polars as pl
+import scoringrules as sr
 from numpy.typing import NDArray
 
 _OUTPUT_COLUMNS = frozenset({"scale", "crps"})
+_ValueTransform = Callable[[NDArray[np.float64]], NDArray[np.float64]]
 
 
 def _convert_to_float64(values: pl.Series) -> NDArray[np.float64]:
@@ -92,7 +93,6 @@ def _validate_column_names(
 def _validate_values(
     forecasts: pl.DataFrame,
     unit_columns: list[str],
-    scale: Literal["natural", "log1p"],
     sample_id_col: str,
     prediction_col: str,
     observation_col: str,
@@ -110,13 +110,6 @@ def _validate_values(
     prediction_values = _convert_to_float64(forecasts.get_column(prediction_col))
     observation_values = _convert_to_float64(forecasts.get_column(observation_col))
 
-    if scale == "log1p" and (
-        np.any(prediction_values <= -1.0) or np.any(observation_values <= -1.0)
-    ):
-        raise ValueError(
-            "prediction and observation values must be greater than -1 for log1p scoring"
-        )
-
     identity_columns = forecasts.select([*unit_columns, sample_id_col])
     if identity_columns.is_duplicated().any():
         raise ValueError("sample identifiers must be unique within each forecast unit")
@@ -130,25 +123,52 @@ def _validate_values(
     return prediction_values, observation_values
 
 
+def _apply_transform(
+    values: NDArray[np.float64],
+    transform: _ValueTransform | None,
+    column_name: str,
+) -> NDArray[np.float64]:
+    """Apply a scale transform and validate its output."""
+    if transform is None:
+        return values
+
+    with np.errstate(all="ignore"):
+        transformed = np.asarray(transform(values))
+
+    if transformed.shape != values.shape:
+        raise ValueError("transform must preserve the shape of its input")
+    if not (
+        np.issubdtype(transformed.dtype, np.integer)
+        or np.issubdtype(transformed.dtype, np.floating)
+    ):
+        raise TypeError("transform must return real numeric values")
+
+    converted = transformed.astype(np.float64, copy=False)
+    if not np.isfinite(converted).all():
+        raise ValueError(
+            f"transform must return only finite values for {column_name!r}"
+        )
+    return converted
+
+
 def _empirical_crps(samples: NDArray[np.float64], observation: float) -> float:
     """Calculate empirical CRPS for one observation and its predictive samples."""
-    sorted_samples = np.sort(samples)
-    sample_count = sorted_samples.size
-    probability_midpoints = (
-        np.arange(sample_count, dtype=np.float64) + 0.5
-    ) / sample_count
-    above_observation = (observation < sorted_samples).astype(np.float64)
-    score = 2.0 * np.mean(
-        (above_observation - probability_midpoints) * (sorted_samples - observation)
+    score = sr.crps_ensemble(
+        observation,
+        samples,
+        estimator="qd",
+        nan_policy="raise",
+        backend="numpy",
     )
-    return float(score)
+    return float(np.asarray(score, dtype=np.float64).item())
 
 
 def score_sample_crps(
     forecasts: pl.DataFrame,
     *,
     forecast_unit: Sequence[str],
-    scale: Literal["natural", "log1p"],
+    transform: _ValueTransform | None,
+    scale_name: str,
     sample_id_col: str = "sample_id",
     prediction_col: str = "predicted",
     observation_col: str = "observed",
@@ -160,10 +180,12 @@ def score_sample_crps(
     observation must be repeated consistently across that unit's sample rows.
     Additional columns are ignored unless included in ``forecast_unit``.
 
-    Select ``scale="natural"`` to score values as supplied or ``scale="log1p"``
-    to transform predictions and observations with ``numpy.log1p`` before
-    scoring. Values at or below -1 are invalid on the log1p scale, and scores
-    calculated on different scales should not be combined or directly compared.
+    Set ``transform=None`` to score values as supplied. To score on another
+    scale, provide a function that accepts and returns a same-shaped NumPy
+    Float64 array. The transform is applied to both predictions and observations
+    before scoring. ``scale_name`` labels the scores in the returned table;
+    scores calculated on different scales should not be combined or directly
+    compared.
 
     The result has one row per forecast unit, sorted by the forecast-unit
     columns. It contains those columns in the requested order, followed by the
@@ -174,18 +196,22 @@ def score_sample_crps(
     Raises
     ------
     TypeError
-        If the input or named value columns have invalid types.
+        If the input, transform, scale name, or named value columns have invalid
+        types.
     ValueError
         If required data are missing, duplicated, inconsistent, non-finite,
-        not safely representable as Float64, or outside the selected scale's
-        domain.
+        not safely representable as Float64, or invalid after transformation.
     """
     if not isinstance(forecasts, pl.DataFrame):
         raise TypeError("forecasts must be a Polars DataFrame")
     if forecasts.is_empty():
         raise ValueError("forecasts must contain at least one row")
-    if scale not in ("natural", "log1p"):
-        raise ValueError("scale must be either 'natural' or 'log1p'")
+    if transform is not None and not callable(transform):
+        raise TypeError("transform must be callable or None")
+    if not isinstance(scale_name, str):
+        raise TypeError("scale_name must be a string")
+    if not scale_name:
+        raise ValueError("scale_name must be nonempty")
 
     unit_columns = _validate_column_names(
         forecasts,
@@ -197,15 +223,14 @@ def score_sample_crps(
     prediction_values, observation_values = _validate_values(
         forecasts,
         unit_columns,
-        scale,
         sample_id_col,
         prediction_col,
         observation_col,
     )
-
-    if scale == "log1p":
-        prediction_values = np.log1p(prediction_values)
-        observation_values = np.log1p(observation_values)
+    prediction_values = _apply_transform(prediction_values, transform, prediction_col)
+    observation_values = _apply_transform(
+        observation_values, transform, observation_col
+    )
 
     prepared = forecasts.with_columns(
         pl.Series(prediction_col, prediction_values, dtype=pl.Float64),
@@ -235,6 +260,6 @@ def score_sample_crps(
     ]
 
     return grouped.select(unit_columns).with_columns(
-        pl.lit(scale, dtype=pl.String).alias("scale"),
+        pl.lit(scale_name, dtype=pl.String).alias("scale"),
         pl.Series("crps", scores, dtype=pl.Float64),
     )
