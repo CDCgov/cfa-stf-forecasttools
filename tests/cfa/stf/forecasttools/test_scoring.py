@@ -285,6 +285,61 @@ def test_numeric_columns_are_safely_converted_to_float64(
     assert result.schema["crps"] == pl.Float64
 
 
+@pytest.mark.parametrize("column", ["predicted", "observed"])
+def test_int64_values_that_lose_precision_in_float64_are_rejected(
+    column: str,
+) -> None:
+    """Scoring rejects integers changed by conversion to Float64."""
+    exactly_representable = 2**53
+    forecasts = pl.DataFrame(
+        {
+            "unit": ["a"],
+            "sample_id": [0],
+            "predicted": pl.Series([exactly_representable], dtype=pl.Int64),
+            "observed": pl.Series([exactly_representable], dtype=pl.Int64),
+        }
+    ).with_columns(pl.Series(column, [exactly_representable + 1], dtype=pl.Int64))
+
+    with pytest.raises(ValueError, match=rf"{column!r}.*safely.*Float64"):
+        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+
+
+def test_large_exactly_representable_int64_values_are_scored() -> None:
+    """Large integers remain valid when Float64 represents them exactly."""
+    exactly_representable = 2**53
+    forecasts = pl.DataFrame(
+        {
+            "unit": ["a"],
+            "sample_id": [0],
+            "predicted": pl.Series([exactly_representable + 2], dtype=pl.Int64),
+            "observed": pl.Series([exactly_representable], dtype=pl.Int64),
+        }
+    )
+
+    result = ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+
+    assert result.item(0, "crps") == 2.0
+
+
+def test_decimal_values_that_lose_precision_in_float64_are_rejected() -> None:
+    """Scoring rejects decimal precision that Float64 cannot preserve."""
+    forecasts = pl.DataFrame(
+        {
+            "unit": ["a"],
+            "sample_id": [0],
+            "predicted": pl.Series(
+                [Decimal("9007199254740992.01")], dtype=pl.Decimal(20, 2)
+            ),
+            "observed": pl.Series(
+                [Decimal("9007199254740992.00")], dtype=pl.Decimal(20, 2)
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="'predicted'.*safely.*Float64"):
+        ft.score_sample_crps(forecasts, forecast_unit=["unit"], scale="natural")
+
+
 @pytest.mark.parametrize(
     "scale,expected_filename",
     [

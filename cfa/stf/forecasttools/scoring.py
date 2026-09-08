@@ -8,6 +8,23 @@ from numpy.typing import NDArray
 _OUTPUT_COLUMNS = frozenset({"scale", "crps"})
 
 
+def _convert_to_float64(values: pl.Series) -> NDArray[np.float64]:
+    """Convert a numeric series to Float64 without changing its values."""
+    converted = values.cast(pl.Float64)
+    converted_values = converted.to_numpy()
+    if not np.isfinite(converted_values).all():
+        raise ValueError(f"{values.name!r} must contain only finite values")
+
+    restored = converted.cast(values.dtype, strict=False)
+    if restored.null_count() > 0 or not restored.equals(values):
+        raise ValueError(
+            f"{values.name!r} contains values that cannot be represented safely "
+            "as Float64"
+        )
+
+    return converted_values
+
+
 def _validate_column_names(
     forecasts: pl.DataFrame,
     forecast_unit: Sequence[str],
@@ -80,7 +97,7 @@ def _validate_values(
     prediction_col: str,
     observation_col: str,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Validate sample and value columns and return Float64 value arrays."""
+    """Validate sample and value columns and return exact Float64 arrays."""
     for column in (prediction_col, observation_col):
         if not forecasts.schema[column].is_numeric():
             raise TypeError(f"{column!r} must be a numeric, non-boolean column")
@@ -90,14 +107,8 @@ def _validate_values(
     if forecasts.get_column(sample_id_col).null_count() > 0:
         raise ValueError(f"{sample_id_col!r} must not contain null values")
 
-    prediction_values = forecasts.get_column(prediction_col).cast(pl.Float64).to_numpy()
-    observation_values = (
-        forecasts.get_column(observation_col).cast(pl.Float64).to_numpy()
-    )
-    if not np.isfinite(prediction_values).all():
-        raise ValueError(f"{prediction_col!r} must contain only finite values")
-    if not np.isfinite(observation_values).all():
-        raise ValueError(f"{observation_col!r} must contain only finite values")
+    prediction_values = _convert_to_float64(forecasts.get_column(prediction_col))
+    observation_values = _convert_to_float64(forecasts.get_column(observation_col))
 
     if scale == "log1p" and (
         np.any(prediction_values <= -1.0) or np.any(observation_values <= -1.0)
@@ -165,8 +176,9 @@ def score_sample_crps(
     TypeError
         If the input or named value columns have invalid types.
     ValueError
-        If required data are missing, duplicated, inconsistent, non-finite, or
-        outside the selected scale's domain.
+        If required data are missing, duplicated, inconsistent, non-finite,
+        not safely representable as Float64, or outside the selected scale's
+        domain.
     """
     if not isinstance(forecasts, pl.DataFrame):
         raise TypeError("forecasts must be a Polars DataFrame")
