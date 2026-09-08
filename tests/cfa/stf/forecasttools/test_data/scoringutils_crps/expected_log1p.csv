@@ -1,4 +1,4 @@
 "model","reference_date","target_end_date","location","target","horizon","scale","crps"
-"continuous","2026-01-05","2026-01-12","US","cases",1,"log1p",0.218273990267664
+"constant","2026-01-05","2026-01-26","US","cases",3,"log1p",0.318453731118535
+"continuous","2026-01-05","2026-01-12","US","cases",1,"log1p",0.240164626586462
 "discrete","2026-01-05","2026-01-19","01","cases",2,"log1p",0.203503853409295
-"single","2026-01-05","2026-01-26","US","cases",3,"log1p",0.318453731118535

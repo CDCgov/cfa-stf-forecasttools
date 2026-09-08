@@ -1,4 +1,4 @@
 "model","reference_date","target_end_date","location","target","horizon","scale","crps"
-"continuous","2026-01-05","2026-01-12","US","cases",1,"natural",0.4375
+"constant","2026-01-05","2026-01-26","US","cases",3,"natural",1.5
+"continuous","2026-01-05","2026-01-12","US","cases",1,"natural",0.59
 "discrete","2026-01-05","2026-01-19","01","cases",2,"natural",0.44
-"single","2026-01-05","2026-01-26","US","cases",3,"natural",1.5

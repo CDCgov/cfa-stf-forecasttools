@@ -2,6 +2,9 @@
 
 Forecasting helpers for the CFA Short-Term Forecasting Team.
 
+## Documentation
+
+See the [project documentation](docs/README.md).
 
 ## License Standard Notice
 The repository utilizes code licensed under the terms of the Apache Software
