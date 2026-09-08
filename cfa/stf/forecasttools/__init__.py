@@ -15,6 +15,7 @@ from .append_prop_data import append_prop_data
 from .augment_samples_with_observations import augment_samples_with_observations
 from .create_proportions import create_proportions
 from .location_table import LOCATION_LIST
+from .scoring import score_sample_crps
 from .utils import coalesce_common_columns, read_tabular, write_tabular
 
 
@@ -33,6 +34,7 @@ __all__ = [
     "append_prop_data",
     "augment_samples_with_observations",
     "create_proportions",
+    "score_sample_crps",
     "get_us_loc_pop_tbl",
     "LOCATION_LIST",
     "arviz",
