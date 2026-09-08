@@ -10,6 +10,7 @@
 *.nc
 !cfa/stf/forecasttools/data/us_location_pop.csv
 !tests/cfa/stf/forecasttools/test_data/test_idata.nc
+!tests/cfa/stf/forecasttools/test_data/scoringutils_crps/*.csv
 
 __pycache__/
 *.py[cod]

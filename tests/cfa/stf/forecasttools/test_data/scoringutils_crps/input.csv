@@ -1,0 +1,11 @@
+model,reference_date,target_end_date,location,target,horizon,sample_id,predicted,observed
+continuous,2026-01-05,2026-01-12,US,cases,1,10,-0.25,1.2
+continuous,2026-01-05,2026-01-12,US,cases,1,11,0.5,1.2
+continuous,2026-01-05,2026-01-12,US,cases,1,12,1.75,1.2
+continuous,2026-01-05,2026-01-12,US,cases,1,13,3.0,1.2
+discrete,2026-01-05,2026-01-19,01,cases,2,20,0,2
+discrete,2026-01-05,2026-01-19,01,cases,2,21,0,2
+discrete,2026-01-05,2026-01-19,01,cases,2,22,2,2
+discrete,2026-01-05,2026-01-19,01,cases,2,23,2,2
+discrete,2026-01-05,2026-01-19,01,cases,2,24,5,2
+single,2026-01-05,2026-01-26,US,cases,3,30,4.5,3
